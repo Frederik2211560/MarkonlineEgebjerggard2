@@ -1,0 +1,70 @@
+name: Deploy markstyring to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build static site
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          node --check app.js
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::Add SUPABASE_URL and SUPABASE_ANON_KEY as GitHub Actions secrets before deploying."
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          output = Path("_site")
+          output.mkdir()
+          for filename in ("index.html", "app.js", "styles.css", "Logo.png"):
+              (output / filename).write_bytes(Path(filename).read_bytes())
+          config = {
+              "url": os.environ["SUPABASE_URL"].rstrip("/"),
+              "anonKey": os.environ["SUPABASE_ANON_KEY"],
+          }
+          (output / "supabase-config.js").write_text(
+              "window.MARKSTYRING_SUPABASE = Object.freeze("
+              + json.dumps(config, ensure_ascii=True)
+              + ");\n",
+              encoding="utf-8",
+          )
+          (output / ".nojekyll").touch()
+          PY
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
