@@ -23,6 +23,7 @@ const pages = {
   fields: { label: 'Marker', icon: 'fields' },
   plans: { label: 'Gødningsplan', icon: 'plans' },
   growth: { label: 'Vækst & tilsyn', icon: 'growth' },
+  machinery: { label: 'Maskinpakke', icon: 'tractor' },
   users: { label: 'Medarbejdere', icon: 'users', directorOnly: true },
 };
 
