@@ -28,7 +28,7 @@ const pages = {
   users: { label: 'Medarbejdere', icon: 'users', directorOnly: true },
 };
 
-const state = { user: null, page: 'dashboard', fields: [], plans: [], observations: [], users: [], search: '', filter: 'Alle' };
+const state = { user: null, page: 'dashboard', fields: [], plans: [], observations: [], machinery: [], users: [], search: '', filter: 'Alle', machinerySearch: '', machineryFilter: 'Alle' };
 const app = document.querySelector('#app');
 const cloudConfig = window.MARKSTYRING_SUPABASE || {};
 const cloudEnabled = Boolean(cloudConfig.url && cloudConfig.anonKey && window.supabase?.createClient);
@@ -278,6 +278,28 @@ async function cloudApi(path, options = {}) {
     return { id: body.id };
   }
 
+  if (resource === 'machinery') {
+    if (method === 'GET') {
+      return {
+        machinery: await cloudResult(
+          await supabaseClient.from('machinery').select('*').order('category').order('name'),
+        ),
+      };
+    }
+    const payload = {
+      ...body,
+      ...(method === 'POST'
+        ? { created_by: state.user.id, created_by_name: state.user.display_name }
+        : {}),
+    };
+    const query = method === 'PATCH'
+      ? supabaseClient.from('machinery').update(payload).eq('id', body.id)
+      : supabaseClient.from('machinery').insert(payload);
+    const { error } = await query;
+    if (error) throw cloudError(error);
+    return { id: body.id };
+  }
+
   if (resource === 'users' && method === 'GET') {
     return {
       users: await cloudResult(
@@ -427,6 +449,18 @@ async function loadData() {
     field_name: item.field_name || fieldsById.get(item.field_id)?.name || '',
   }));
   state.users = results[3]?.users || [];
+  if (cloudEnabled) {
+    const result = await api('/api/machinery');
+    state.machinery = result.machinery;
+  } else {
+    try {
+      const savedMachinery = JSON.parse(localStorage.getItem('markstyring-machinery') || '[]');
+      if (!Array.isArray(savedMachinery)) throw new Error('Dataene har et ugyldigt format.');
+      state.machinery = savedMachinery;
+    } catch (error) {
+      throw new Error(`Maskinlisten kunne ikke læses fra denne browser: ${error.message}`);
+    }
+  }
 }
 
 function renderApp() {
@@ -611,11 +645,31 @@ function renderUsers() {
 }
 
 function renderMachinery() {
-  return `${heading('Maskiner og udstyr', 'Maskinpakke', 'Samlet oversigt over gårdens maskiner og udstyr.')}
-    <section class="card panel">
-      <h2 class="panel-title">Kom godt i gang</h2>
-      <p class="panel-subtitle">Maskinpakke-siden er oprettet. Her kan du senere tilføje oplysninger om gårdens maskiner og udstyr.</p>
-    </section>`;
+  const query = state.machinerySearch.trim().toLocaleLowerCase('da');
+  const items = state.machinery.filter(item => {
+    const matchesText = `${item.name} ${item.make || ''} ${item.model || ''} ${item.registration || ''} ${item.notes || ''}`.toLocaleLowerCase('da').includes(query);
+    return matchesText && (state.machineryFilter === 'Alle' || item.category === state.machineryFilter);
+  });
+  return `${heading('Maskiner og udstyr', 'Maskinpakke', 'Hold styr på gårdens maskiner og redskaber.', actionButton('new-machinery', 'Tilføj maskine eller redskab'))}
+    ${!cloudEnabled ? '<div class="demo-note">I denne lokale version gemmes maskinlisten kun i denne browser. Den deles ikke med andre enheder.</div>' : ''}
+    <div class="card table-card">
+      <div class="toolbar">
+        <label class="search-wrap">${icons.search}<input id="search-machinery" value="${esc(state.machinerySearch)}" placeholder="Søg navn, mærke eller model…" aria-label="Søg maskiner og redskaber"></label>
+        <select id="filter-machinery" class="filter-select" aria-label="Filtrér type">
+          ${['Alle', 'Maskine', 'Redskab'].map(value => `<option ${state.machineryFilter === value ? 'selected' : ''}>${value}</option>`).join('')}
+        </select>
+      </div>
+      ${items.length ? `<div class="table-wrap"><table><thead><tr><th>Type</th><th>Maskine / redskab</th><th>Årgang</th><th>Nr.</th><th>Status</th><th>Noter</th><th></th></tr></thead><tbody>
+        ${items.map(item => `<tr>
+          <td>${esc(item.category)}</td>
+          <td><div class="primary-cell">${esc(item.name)}</div><div class="secondary-cell">${esc([item.make, item.model].filter(Boolean).join(' '))}</div></td>
+          <td>${esc(item.year || '–')}</td><td>${esc(item.registration || '–')}</td>
+          <td><span class="status ${item.status === 'Ude af drift' ? 'alert' : item.status === 'På værksted' ? 'pending' : ''}">${esc(item.status)}</span></td>
+          <td>${esc(item.notes || '–')}</td>
+          <td><div class="table-actions"><button class="icon-button" data-edit="machinery" data-id="${esc(item.id)}" aria-label="Redigér ${esc(item.name)}">${icons.edit}</button>${state.user.role === 'director' ? `<button class="icon-button delete" data-delete="machinery" data-id="${esc(item.id)}" data-name="${esc(item.name)}" aria-label="Slet ${esc(item.name)}">${icons.trash}</button>` : ''}</div></td>
+        </tr>`).join('')}
+      </tbody></table></div>` : `<div class="empty"><div class="empty-icon">✳</div><strong>${state.machinery.length ? 'Ingen resultater' : 'Ingen maskiner eller redskaber endnu'}</strong><div>${state.machinery.length ? 'Prøv en anden søgning eller filter.' : 'Tilføj gårdens første maskine eller redskab.'}</div>${state.machinery.length ? '' : `<button class="link-button empty-action" data-action="new-machinery">Tilføj maskine eller redskab →</button>`}</div>`}
+    </div>`;
 }
 
 function bindPageEvents(target) {
@@ -625,6 +679,7 @@ function bindPageEvents(target) {
     if (action === 'new-plan') openForm('plan');
     if (action === 'new-observation') openForm('observation');
     if (action === 'new-user') openForm('user');
+    if (action === 'new-machinery') openForm('machinery');
     if (action === 'change-password') openForm('password');
   }));
   target.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => { state.page = button.dataset.page; renderApp(); }));
@@ -636,6 +691,20 @@ function bindPageEvents(target) {
   if (search) search.addEventListener('input', () => { state.search = search.value; const position = search.selectionStart; renderPage(); const next = document.querySelector('#search-fields'); next.focus(); next.setSelectionRange(position, position); });
   const filter = target.querySelector('#filter-fields');
   if (filter) filter.addEventListener('change', () => { state.filter = filter.value; renderPage(); });
+  const machinerySearch = target.querySelector('#search-machinery');
+  if (machinerySearch) machinerySearch.addEventListener('input', () => {
+    state.machinerySearch = machinerySearch.value;
+    const position = machinerySearch.selectionStart;
+    renderPage();
+    const next = document.querySelector('#search-machinery');
+    next.focus();
+    next.setSelectionRange(position, position);
+  });
+  const machineryFilter = target.querySelector('#filter-machinery');
+  if (machineryFilter) machineryFilter.addEventListener('change', () => {
+    state.machineryFilter = machineryFilter.value;
+    renderPage();
+  });
 }
 
 function openForm(type, editId) {
@@ -645,17 +714,18 @@ function openForm(type, editId) {
     renderApp();
     return;
   }
-  const collections = { field: state.fields, plan: state.plans, observation: state.observations, user: [], password: [] };
+  const collections = { field: state.fields, plan: state.plans, observation: state.observations, machinery: state.machinery, user: [], password: [] };
   const record = editId ? collections[type]?.find(item => item.id === editId) : undefined;
   const forms = {
     field: fieldForm(record),
     plan: planForm(record),
     observation: observationForm(record),
+    machinery: machineryForm(record),
     user: userForm(),
     password: passwordForm(),
   };
-  const titles = { field: record ? 'Redigér mark' : 'Opret mark', plan: record ? 'Redigér gødningsplan' : 'Ny gødningsplan', observation: record ? 'Redigér marktilsyn' : 'Registrér marktilsyn', user: 'Opret medarbejder', password: 'Skift adgangskode' };
-  const subtitles = { field: 'Oplysningerne gemmes på gårdens database.', plan: 'Planen bliver synlig for alle med adgang til markstyringen.', observation: 'Et opdateret tilsyn gør det lettere at følge markens udvikling.', user: 'Medarbejderen kan logge ind med oplysningerne herunder.', password: 'Vælg en stærk adgangskode med mindst 12 tegn.' };
+  const titles = { field: record ? 'Redigér mark' : 'Opret mark', plan: record ? 'Redigér gødningsplan' : 'Ny gødningsplan', observation: record ? 'Redigér marktilsyn' : 'Registrér marktilsyn', machinery: record ? 'Redigér maskine eller redskab' : 'Tilføj maskine eller redskab', user: 'Opret medarbejder', password: 'Skift adgangskode' };
+  const subtitles = { field: 'Oplysningerne gemmes på gårdens database.', plan: 'Planen bliver synlig for alle med adgang til markstyringen.', observation: 'Et opdateret tilsyn gør det lettere at følge markens udvikling.', machinery: cloudEnabled ? 'Oplysningerne gemmes i gårdens delte database.' : 'Oplysningerne gemmes kun i denne browser.', user: 'Medarbejderen kan logge ind med oplysningerne herunder.', password: 'Vælg en stærk adgangskode med mindst 12 tegn.' };
   document.querySelector('.modal-backdrop')?.remove();
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
@@ -709,6 +779,19 @@ function observationForm(record = {}) {
   </div>`;
 }
 
+function machineryForm(record = {}) {
+  return `<div class="form-grid">
+    ${formSelect('category', 'Type', ['Maskine', 'Redskab'], record.category || 'Maskine', true)}
+    ${formInput('name', 'Navn', record.name, 'Fx Traktor 724 Vario', { required: true })}
+    ${formInput('make', 'Mærke', record.make, 'Fx Fendt')}
+    ${formInput('model', 'Model', record.model, 'Fx 724 Vario')}
+    ${formInput('year', 'Årgang', record.year || '', 'Fx 2022', { type: 'number', min: '1900', step: '1' })}
+    ${formInput('registration', 'Registreringsnr. / internt nr.', record.registration, 'Fx AB 12 345')}
+    ${formSelect('status', 'Status', ['Aktiv', 'På værksted', 'Ude af drift'], record.status || 'Aktiv', true)}
+    ${formTextarea('notes', 'Noter', record.notes, 'Skriv fx placering, serviceoplysninger eller andet…')}
+  </div>`;
+}
+
 function userForm() {
   return `<div class="form-grid">${formInput('display_name', 'Medarbejderens navn', '', 'Fx Mette Jensen', { required: true, full: true })}
     ${formInput('username', 'Brugernavn', '', 'Fx mette.jensen', { required: true })}
@@ -757,13 +840,18 @@ async function submitForm(event) {
   if (type === 'field' && body.area) body.area = Number(body.area.replace(',', '.'));
   if (type === 'field') body.nitrogen_target = body.nitrogen_target ? Number(body.nitrogen_target.replace(',', '.')) : 0;
   if (type === 'plan') body.amount = Number(body.amount.replace(',', '.'));
-  const endpoints = { field: '/api/fields', plan: '/api/plans', observation: '/api/observations', user: '/api/users', password: '/api/change-password' };
+  if (type === 'machinery') body.year = body.year ? Number(body.year) : null;
+  const endpoints = { field: '/api/fields', plan: '/api/plans', observation: '/api/observations', machinery: '/api/machinery', user: '/api/users', password: '/api/change-password' };
   if (id) body.id = id;
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
   document.querySelector('#form-error').textContent = '';
   try {
-    await api(endpoints[type], { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+    if (type === 'machinery' && !cloudEnabled) {
+      saveLocalMachinery(body, id);
+    } else {
+      await api(endpoints[type], { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+    }
     document.querySelector('.modal-backdrop')?.remove();
     if (type === 'password') {
       notify('Din adgangskode er ændret.');
@@ -780,11 +868,36 @@ async function submitForm(event) {
   }
 }
 
+function saveLocalMachinery(record, id) {
+  const records = state.machinery.slice();
+  const saved = {
+    ...record,
+    id: id || crypto.randomUUID(),
+    created_at: id ? records.find(item => item.id === id)?.created_at : new Date().toISOString(),
+  };
+  const index = records.findIndex(item => item.id === id);
+  if (index >= 0) records[index] = saved;
+  else records.push(saved);
+  try {
+    localStorage.setItem('markstyring-machinery', JSON.stringify(records));
+  } catch (error) {
+    throw new Error(`Maskinen kunne ikke gemmes i denne browser: ${error.message}`);
+  }
+}
+
 async function deleteItem(resource, id, name) {
   const relatedWarning = resource === 'fields' ? ' Tilknyttede gødningsplaner og tilsyn slettes også.' : '';
   if (!window.confirm(`Vil du slette "${name}"? Handlingen kan ikke fortrydes.${relatedWarning}`)) return;
   try {
-    await api(`/api/${resource}`, { method: 'DELETE', body: JSON.stringify({ id }), headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'EgebjerggaardApp' } });
+    if (resource === 'machinery' && !cloudEnabled) {
+      try {
+        localStorage.setItem('markstyring-machinery', JSON.stringify(state.machinery.filter(item => item.id !== id)));
+      } catch (error) {
+        throw new Error(`Maskinen kunne ikke slettes fra denne browser: ${error.message}`);
+      }
+    } else {
+      await api(`/api/${resource}`, { method: 'DELETE', body: JSON.stringify({ id }), headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'EgebjerggaardApp' } });
+    }
     await loadData();
     renderApp();
     notify('Registreringen er slettet.');
@@ -813,6 +926,7 @@ async function logout() {
     state.fields = [];
     state.plans = [];
     state.observations = [];
+    state.machinery = [];
     state.users = [];
     renderLogin(false);
   } catch (error) {
