@@ -16,6 +16,7 @@ const icons = {
   lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3m-4 4v3"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></svg>',
   tractor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 16h10l2 3h6v-6h-4l-2-4h-5v7"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M10 9h4M7 12V7h5"/></svg>',
+  economy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M7 9h.01M17 15h.01"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
 };
 
@@ -25,10 +26,15 @@ const pages = {
   plans: { label: 'Gødningsplan', icon: 'plans' },
   growth: { label: 'Vækst & tilsyn', icon: 'growth' },
   machinery: { label: 'Maskinpakke', icon: 'tractor' },
+  economy: { label: 'Økonomi', icon: 'economy' },
   users: { label: 'Medarbejdere', icon: 'users', directorOnly: true },
 };
 
-const state = { user: null, page: 'dashboard', fields: [], plans: [], observations: [], machinery: [], users: [], search: '', filter: 'Alle', machinerySearch: '', machineryFilter: 'Alle' };
+const state = { user: null, page: 'dashboard', fields: [], plans: [], observations: [], machinery: [], economy: [], users: [], search: '', filter: 'Alle', machinerySearch: '', machineryFilter: 'Alle', economySearch: '', economyFilter: 'Alle', economyYear: String(new Date().getFullYear()) };
+const economyCategories = {
+  Indtægt: ['Afgrødesalg', 'Husdyrsalg', 'Tilskud', 'Lejeindtægt', 'Øvrige indtægter'],
+  Udgift: ['Frø og udsæd', 'Gødning', 'Planteværn', 'Brændstof', 'Maskiner og reparation', 'Løn og personale', 'Forsikring', 'Vedligehold', 'Øvrige udgifter'],
+};
 const app = document.querySelector('#app');
 const cloudConfig = window.MARKSTYRING_SUPABASE || {};
 const cloudEnabled = Boolean(cloudConfig.url && cloudConfig.anonKey && window.supabase?.createClient);
@@ -41,6 +47,7 @@ const esc = (v = '') => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<':
 const initials = name => name.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase();
 const fmtDate = value => value ? new Intl.DateTimeFormat('da-DK', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T12:00:00`)) : '–';
 const fmtNumber = value => new Intl.NumberFormat('da-DK', { maximumFractionDigits: 1 }).format(Number(value) || 0);
+const fmtCurrency = value => new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 2 }).format(Number(value) || 0);
 const todayText = new Intl.DateTimeFormat('da-DK', { weekday: 'long', day: 'numeric', month: 'long' }).format(today);
 
 async function api(path, options = {}) {
@@ -300,6 +307,28 @@ async function cloudApi(path, options = {}) {
     return { id: body.id };
   }
 
+  if (resource === 'economy') {
+    if (method === 'GET') {
+      return {
+        economy: await cloudResult(
+          await supabaseClient.from('economy').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }),
+        ),
+      };
+    }
+    const payload = {
+      ...body,
+      ...(method === 'POST'
+        ? { created_by: state.user.id, created_by_name: state.user.display_name }
+        : {}),
+    };
+    const query = method === 'PATCH'
+      ? supabaseClient.from('economy').update(payload).eq('id', body.id)
+      : supabaseClient.from('economy').insert(payload);
+    const { error } = await query;
+    if (error) throw cloudError(error);
+    return { id: body.id };
+  }
+
   if (resource === 'users' && method === 'GET') {
     return {
       users: await cloudResult(
@@ -452,13 +481,18 @@ async function loadData() {
   if (cloudEnabled) {
     const result = await api('/api/machinery');
     state.machinery = result.machinery;
+    const economyResult = await api('/api/economy');
+    state.economy = economyResult.economy;
   } else {
     try {
       const savedMachinery = JSON.parse(localStorage.getItem('markstyring-machinery') || '[]');
       if (!Array.isArray(savedMachinery)) throw new Error('Dataene har et ugyldigt format.');
       state.machinery = savedMachinery;
+      const savedEconomy = JSON.parse(localStorage.getItem('markstyring-economy') || '[]');
+      if (!Array.isArray(savedEconomy)) throw new Error('Økonomidataene har et ugyldigt format.');
+      state.economy = savedEconomy;
     } catch (error) {
-      throw new Error(`Maskinlisten kunne ikke læses fra denne browser: ${error.message}`);
+      throw new Error(`Lokale data kunne ikke læses fra denne browser: ${error.message}`);
     }
   }
 }
@@ -492,6 +526,8 @@ function renderApp() {
     if (state.page === 'fields') openForm('field');
     else if (state.page === 'plans') openForm('plan');
     else if (state.page === 'growth') openForm('observation');
+    else if (state.page === 'economy') openForm('economy');
+    else if (state.page === 'machinery') openForm('machinery');
     else openForm(state.fields.length ? 'plan' : 'field');
   });
 }
@@ -513,6 +549,7 @@ function renderPage() {
   if (state.page === 'growth') target.innerHTML = renderGrowth();
   if (state.page === 'users') target.innerHTML = renderUsers();
   if (state.page === 'machinery') target.innerHTML = renderMachinery();
+  if (state.page === 'economy') target.innerHTML = renderEconomy();
   bindPageEvents(target);
 }
 
@@ -672,6 +709,93 @@ function renderMachinery() {
     </div>`;
 }
 
+function renderEconomy() {
+  const year = Number(state.economyYear);
+  const yearEntries = state.economy.filter(entry => Number(entry.date.slice(0, 4)) === year);
+  const income = yearEntries.filter(entry => entry.type === 'Indtægt').reduce((sum, entry) => sum + Number(entry.amount), 0);
+  const expenses = yearEntries.filter(entry => entry.type === 'Udgift').reduce((sum, entry) => sum + Number(entry.amount), 0);
+  const balance = income - expenses;
+  const months = Array.from({ length: 12 }, (_, index) => {
+    const month = String(index + 1).padStart(2, '0');
+    const entries = yearEntries.filter(entry => entry.date.slice(5, 7) === month);
+    return {
+      label: new Intl.DateTimeFormat('da-DK', { month: 'short' }).format(new Date(year, index, 1)),
+      income: entries.filter(entry => entry.type === 'Indtægt').reduce((sum, entry) => sum + Number(entry.amount), 0),
+      expenses: entries.filter(entry => entry.type === 'Udgift').reduce((sum, entry) => sum + Number(entry.amount), 0),
+    };
+  });
+  const chartMax = Math.max(1, ...months.flatMap(month => [month.income, month.expenses]));
+  const years = [...new Set([String(new Date().getFullYear()), ...state.economy.map(entry => entry.date.slice(0, 4))])]
+    .sort((a, b) => Number(b) - Number(a));
+  const query = state.economySearch.trim().toLocaleLowerCase('da');
+  const entries = yearEntries
+    .filter(entry => state.economyFilter === 'Alle' || entry.type === state.economyFilter)
+    .filter(entry => `${entry.description} ${entry.category} ${entry.reference || ''} ${entry.notes || ''}`.toLocaleLowerCase('da').includes(query))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const expensesByCategory = yearEntries
+    .filter(entry => entry.type === 'Udgift')
+    .reduce((totals, entry) => {
+      totals[entry.category] = (totals[entry.category] || 0) + Number(entry.amount);
+      return totals;
+    }, {});
+  const expenseCategories = Object.entries(expensesByCategory).sort((a, b) => b[1] - a[1]);
+  const highestCategoryExpense = Math.max(1, ...expenseCategories.map(([, amount]) => amount));
+  const moneyChart = months.map(month => {
+    const incomeHeight = month.income ? Math.max(3, month.income / chartMax * 100) : 0;
+    const expenseHeight = month.expenses ? Math.max(3, month.expenses / chartMax * 100) : 0;
+    return `<div style="min-width:28px;flex:1;text-align:center" aria-label="${esc(month.label)}: indtægter ${esc(fmtCurrency(month.income))}, udgifter ${esc(fmtCurrency(month.expenses))}">
+      <div style="height:112px;display:flex;align-items:flex-end;justify-content:center;gap:3px;border-bottom:1px solid var(--line)">
+        <span title="Indtægter: ${esc(fmtCurrency(month.income))}" style="width:9px;height:${incomeHeight}%;background:var(--pine);border-radius:4px 4px 0 0"></span>
+        <span title="Udgifter: ${esc(fmtCurrency(month.expenses))}" style="width:9px;height:${expenseHeight}%;background:var(--lime);border-radius:4px 4px 0 0"></span>
+      </div>
+      <span style="display:block;margin-top:8px;font-size:10px;color:var(--muted)">${esc(month.label)}</span>
+    </div>`;
+  }).join('');
+  const expenseCategoryRows = expenseCategories.length
+    ? expenseCategories.map(([category, amount]) => `<div style="margin-top:16px">
+        <div style="display:flex;justify-content:space-between;gap:12px;font-size:12px"><strong>${esc(category)}</strong><span>${esc(fmtCurrency(amount))}</span></div>
+        <div style="height:6px;margin-top:7px;background:var(--line);border-radius:99px;overflow:hidden"><div style="height:100%;width:${Math.max(2, amount / highestCategoryExpense * 100)}%;background:var(--pine);border-radius:99px"></div></div>
+      </div>`).join('')
+    : '<p class="panel-subtitle">Udgifter fordelt på kategori vises, når du registrerer udgifter.</p>';
+  return `${heading('Tal på gården', 'Økonomi', 'Få overblik over indtægter, udgifter og årets resultat.', actionButton('new-economy', 'Tilføj post'))}
+    ${!cloudEnabled ? '<div class="demo-note">I denne lokale version gemmes økonomiposter kun i denne browser. De deles ikke med andre enheder.</div>' : ''}
+    <div class="toolbar" style="justify-content:flex-end;margin-bottom:16px">
+      <label class="form-field" style="display:flex;align-items:center;gap:10px;margin:0"><span>Regnskabsår</span><select id="filter-economy-year" class="filter-select" aria-label="Vælg regnskabsår">${years.map(value => `<option value="${value}" ${state.economyYear === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+    </div>
+    <div class="grid stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr))">
+      ${statCard('Indtægter', fmtCurrency(income), `${year} · ${yearEntries.filter(entry => entry.type === 'Indtægt').length} poster`, 'economy', 'lime')}
+      ${statCard('Udgifter', fmtCurrency(expenses), `${year} · ${yearEntries.filter(entry => entry.type === 'Udgift').length} poster`, 'calendar', 'amber')}
+      ${statCard('Årets resultat', fmtCurrency(balance), balance >= 0 ? 'Indtægter minus udgifter' : 'Udgifterne overstiger indtægterne', 'dashboard', balance >= 0 ? '' : 'amber')}
+    </div>
+    <div class="grid dashboard-grid" style="margin-top:20px">
+      <section class="card panel">
+        <div class="panel-head"><div><h2 class="panel-title">Indtægter og udgifter</h2><p class="panel-subtitle">Månedligt overblik for ${year}</p></div>
+          <div style="display:flex;gap:14px;font-size:11px"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--pine);margin-right:5px"></span>Indtægter</span><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--lime);margin-right:5px"></span>Udgifter</span></div>
+        </div>
+        <div role="img" aria-label="Søjlediagram over indtægter og udgifter måned for måned" style="display:flex;gap:8px;align-items:flex-end;overflow-x:auto;padding:16px 4px 4px">${moneyChart}</div>
+      </section>
+      <section class="card panel">
+        <div class="panel-head"><div><h2 class="panel-title">Udgifter fordelt</h2><p class="panel-subtitle">Største udgift først · ${year}</p></div></div>
+        ${expenseCategoryRows}
+      </section>
+    </div>
+    <section class="card table-card" style="margin-top:20px">
+      <div class="panel-head" style="padding:20px 20px 0"><div><h2 class="panel-title">Posteringer</h2><p class="panel-subtitle">${entries.length} ${entries.length === 1 ? 'post' : 'poster'} i ${year}</p></div><button class="button secondary small" data-action="new-economy">${icons.plus}<span>Ny post</span></button></div>
+      <div class="toolbar">
+        <label class="search-wrap">${icons.search}<input id="search-economy" value="${esc(state.economySearch)}" placeholder="Søg beskrivelse eller kategori…" aria-label="Søg økonomiposter"></label>
+        <select id="filter-economy-type" class="filter-select" aria-label="Filtrér posteringstype">${['Alle', 'Indtægt', 'Udgift'].map(value => `<option ${state.economyFilter === value ? 'selected' : ''}>${value}</option>`).join('')}</select>
+      </div>
+      ${entries.length ? `<div class="table-wrap"><table><thead><tr><th>Dato</th><th>Type</th><th>Kategori</th><th>Beskrivelse</th><th>Bilagsnr.</th><th>Registreret af</th><th>Beløb</th><th></th></tr></thead><tbody>
+        ${entries.map(entry => `<tr>
+          <td>${fmtDate(entry.date)}</td><td><span class="status ${entry.type === 'Indtægt' ? '' : 'pending'}">${esc(entry.type)}</span></td>
+          <td>${esc(entry.category)}</td><td><div class="primary-cell">${esc(entry.description)}</div>${entry.notes ? `<div class="secondary-cell">${esc(entry.notes)}</div>` : ''}</td>
+          <td>${esc(entry.reference || '–')}</td><td>${esc(entry.created_by_name || '–')}</td><td><strong style="color:${entry.type === 'Indtægt' ? 'var(--pine)' : 'var(--amber)'}">${entry.type === 'Indtægt' ? '+' : '−'}${esc(fmtCurrency(entry.amount))}</strong></td>
+          <td><div class="table-actions"><button class="icon-button" data-edit="economy" data-id="${esc(entry.id)}" aria-label="Redigér ${esc(entry.description)}">${icons.edit}</button>${state.user.role === 'director' ? `<button class="icon-button delete" data-delete="economy" data-id="${esc(entry.id)}" data-name="${esc(entry.description)}" aria-label="Slet ${esc(entry.description)}">${icons.trash}</button>` : ''}</div></td>
+        </tr>`).join('')}
+      </tbody></table></div>` : `<div class="empty"><div class="empty-icon">✳</div><strong>${yearEntries.length ? 'Ingen poster matcher søgningen' : 'Ingen økonomiposter for dette år'}</strong><div>${yearEntries.length ? 'Prøv en anden søgning eller et andet filter.' : 'Tilføj en indtægt eller udgift for at komme i gang.'}</div>${yearEntries.length ? '' : '<button class="link-button empty-action" data-action="new-economy">Tilføj første post →</button>'}</div>`}
+    </section>`;
+}
+
 function bindPageEvents(target) {
   target.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => {
     const action = button.dataset.action;
@@ -680,6 +804,7 @@ function bindPageEvents(target) {
     if (action === 'new-observation') openForm('observation');
     if (action === 'new-user') openForm('user');
     if (action === 'new-machinery') openForm('machinery');
+    if (action === 'new-economy') openForm('economy');
     if (action === 'change-password') openForm('password');
   }));
   target.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => { state.page = button.dataset.page; renderApp(); }));
@@ -705,6 +830,25 @@ function bindPageEvents(target) {
     state.machineryFilter = machineryFilter.value;
     renderPage();
   });
+  const economySearch = target.querySelector('#search-economy');
+  if (economySearch) economySearch.addEventListener('input', () => {
+    state.economySearch = economySearch.value;
+    const position = economySearch.selectionStart;
+    renderPage();
+    const next = document.querySelector('#search-economy');
+    next.focus();
+    next.setSelectionRange(position, position);
+  });
+  const economyFilter = target.querySelector('#filter-economy-type');
+  if (economyFilter) economyFilter.addEventListener('change', () => {
+    state.economyFilter = economyFilter.value;
+    renderPage();
+  });
+  const economyYear = target.querySelector('#filter-economy-year');
+  if (economyYear) economyYear.addEventListener('change', () => {
+    state.economyYear = economyYear.value;
+    renderPage();
+  });
 }
 
 function openForm(type, editId) {
@@ -714,18 +858,19 @@ function openForm(type, editId) {
     renderApp();
     return;
   }
-  const collections = { field: state.fields, plan: state.plans, observation: state.observations, machinery: state.machinery, user: [], password: [] };
+  const collections = { field: state.fields, plan: state.plans, observation: state.observations, machinery: state.machinery, economy: state.economy, user: [], password: [] };
   const record = editId ? collections[type]?.find(item => item.id === editId) : undefined;
   const forms = {
     field: fieldForm(record),
     plan: planForm(record),
     observation: observationForm(record),
     machinery: machineryForm(record),
+    economy: economyForm(record),
     user: userForm(),
     password: passwordForm(),
   };
-  const titles = { field: record ? 'Redigér mark' : 'Opret mark', plan: record ? 'Redigér gødningsplan' : 'Ny gødningsplan', observation: record ? 'Redigér marktilsyn' : 'Registrér marktilsyn', machinery: record ? 'Redigér maskine eller redskab' : 'Tilføj maskine eller redskab', user: 'Opret medarbejder', password: 'Skift adgangskode' };
-  const subtitles = { field: 'Oplysningerne gemmes på gårdens database.', plan: 'Planen bliver synlig for alle med adgang til markstyringen.', observation: 'Et opdateret tilsyn gør det lettere at følge markens udvikling.', machinery: cloudEnabled ? 'Oplysningerne gemmes i gårdens delte database.' : 'Oplysningerne gemmes kun i denne browser.', user: 'Medarbejderen kan logge ind med oplysningerne herunder.', password: 'Vælg en stærk adgangskode med mindst 12 tegn.' };
+  const titles = { field: record ? 'Redigér mark' : 'Opret mark', plan: record ? 'Redigér gødningsplan' : 'Ny gødningsplan', observation: record ? 'Redigér marktilsyn' : 'Registrér marktilsyn', machinery: record ? 'Redigér maskine eller redskab' : 'Tilføj maskine eller redskab', economy: record ? 'Redigér økonomipost' : 'Tilføj økonomipost', user: 'Opret medarbejder', password: 'Skift adgangskode' };
+  const subtitles = { field: 'Oplysningerne gemmes på gårdens database.', plan: 'Planen bliver synlig for alle med adgang til markstyringen.', observation: 'Et opdateret tilsyn gør det lettere at følge markens udvikling.', machinery: cloudEnabled ? 'Oplysningerne gemmes i gårdens delte database.' : 'Oplysningerne gemmes kun i denne browser.', economy: cloudEnabled ? 'Posten gemmes i gårdens delte økonomioversigt.' : 'Posten gemmes kun i denne browser.', user: 'Medarbejderen kan logge ind med oplysningerne herunder.', password: 'Vælg en stærk adgangskode med mindst 12 tegn.' };
   document.querySelector('.modal-backdrop')?.remove();
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
@@ -733,7 +878,15 @@ function openForm(type, editId) {
   document.body.append(backdrop);
   backdrop.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => backdrop.remove()));
   backdrop.addEventListener('click', event => { if (event.target === backdrop) backdrop.remove(); });
-  backdrop.querySelector('#data-form').addEventListener('submit', submitForm);
+  const form = backdrop.querySelector('#data-form');
+  form.addEventListener('submit', submitForm);
+  const economyType = form.querySelector('#f-type');
+  if (economyType) economyType.addEventListener('change', () => {
+    const category = form.querySelector('#f-category');
+    const categories = economyCategories[economyType.value];
+    const selected = categories.includes(category.value) ? category.value : categories[0];
+    category.innerHTML = categories.map(value => `<option ${value === selected ? 'selected' : ''}>${esc(value)}</option>`).join('');
+  });
   backdrop.querySelector('input, select')?.focus();
 }
 
@@ -792,6 +945,22 @@ function machineryForm(record = {}) {
   </div>`;
 }
 
+function economyForm(record = {}) {
+  const type = record.type || 'Udgift';
+  const categories = economyCategories[type];
+  const selectedCategory = categories.includes(record.category) ? record.category : categories[0];
+  const categoryOptions = categories.map(value => `<option ${value === selectedCategory ? 'selected' : ''}>${esc(value)}</option>`).join('');
+  return `<div class="form-grid">
+    ${formSelect('type', 'Posteringstype', ['Udgift', 'Indtægt'], type, true)}
+    ${formSelect('category', 'Kategori', [], selectedCategory, true, categoryOptions)}
+    ${formInput('date', 'Dato', record.date || formatDateForInput(), '', { type: 'date', required: true })}
+    ${formInput('amount', 'Beløb (kr.)', record.amount ?? '', 'Fx 1250,00', { type: 'number', required: true, min: '.01', step: '.01' })}
+    ${formInput('description', 'Beskrivelse', record.description, 'Fx Diesel til traktor', { required: true, full: true })}
+    ${formInput('reference', 'Bilagsnr. / reference', record.reference, 'Fx Faktura 1042')}
+    ${formTextarea('notes', 'Noter', record.notes, 'Evt. yderligere oplysninger…')}
+  </div>`;
+}
+
 function userForm() {
   return `<div class="form-grid">${formInput('display_name', 'Medarbejderens navn', '', 'Fx Mette Jensen', { required: true, full: true })}
     ${formInput('username', 'Brugernavn', '', 'Fx mette.jensen', { required: true })}
@@ -841,7 +1010,8 @@ async function submitForm(event) {
   if (type === 'field') body.nitrogen_target = body.nitrogen_target ? Number(body.nitrogen_target.replace(',', '.')) : 0;
   if (type === 'plan') body.amount = Number(body.amount.replace(',', '.'));
   if (type === 'machinery') body.year = body.year ? Number(body.year) : null;
-  const endpoints = { field: '/api/fields', plan: '/api/plans', observation: '/api/observations', machinery: '/api/machinery', user: '/api/users', password: '/api/change-password' };
+  if (type === 'economy') body.amount = Number(body.amount.replace(',', '.'));
+  const endpoints = { field: '/api/fields', plan: '/api/plans', observation: '/api/observations', machinery: '/api/machinery', economy: '/api/economy', user: '/api/users', password: '/api/change-password' };
   if (id) body.id = id;
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
@@ -849,6 +1019,8 @@ async function submitForm(event) {
   try {
     if (type === 'machinery' && !cloudEnabled) {
       saveLocalMachinery(body, id);
+    } else if (type === 'economy' && !cloudEnabled) {
+      saveLocalEconomy(body, id);
     } else {
       await api(endpoints[type], { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
     }
@@ -872,7 +1044,7 @@ function saveLocalMachinery(record, id) {
   const records = state.machinery.slice();
   const saved = {
     ...record,
-    id: id || crypto.randomUUID(),
+    id: id || generateLocalId(),
     created_at: id ? records.find(item => item.id === id)?.created_at : new Date().toISOString(),
   };
   const index = records.findIndex(item => item.id === id);
@@ -885,6 +1057,34 @@ function saveLocalMachinery(record, id) {
   }
 }
 
+function saveLocalEconomy(record, id) {
+  const records = state.economy.slice();
+  const saved = {
+    ...record,
+    id: id || generateLocalId(),
+    created_at: id ? records.find(item => item.id === id)?.created_at : new Date().toISOString(),
+  };
+  const index = records.findIndex(item => item.id === id);
+  if (index >= 0) records[index] = saved;
+  else records.push(saved);
+  try {
+    localStorage.setItem('markstyring-economy', JSON.stringify(records));
+  } catch (error) {
+    throw new Error(`Økonomiposten kunne ikke gemmes i denne browser: ${error.message}`);
+  }
+}
+
+function generateLocalId() {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi?.getRandomValues) throw new Error('Browseren understøtter ikke sikker oprettelse af registrerings-id.');
+  if (cryptoApi.randomUUID) return cryptoApi.randomUUID();
+  const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 async function deleteItem(resource, id, name) {
   const relatedWarning = resource === 'fields' ? ' Tilknyttede gødningsplaner og tilsyn slettes også.' : '';
   if (!window.confirm(`Vil du slette "${name}"? Handlingen kan ikke fortrydes.${relatedWarning}`)) return;
@@ -894,6 +1094,12 @@ async function deleteItem(resource, id, name) {
         localStorage.setItem('markstyring-machinery', JSON.stringify(state.machinery.filter(item => item.id !== id)));
       } catch (error) {
         throw new Error(`Maskinen kunne ikke slettes fra denne browser: ${error.message}`);
+      }
+    } else if (resource === 'economy' && !cloudEnabled) {
+      try {
+        localStorage.setItem('markstyring-economy', JSON.stringify(state.economy.filter(item => item.id !== id)));
+      } catch (error) {
+        throw new Error(`Økonomiposten kunne ikke slettes fra denne browser: ${error.message}`);
       }
     } else {
       await api(`/api/${resource}`, { method: 'DELETE', body: JSON.stringify({ id }), headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'EgebjerggaardApp' } });
@@ -927,6 +1133,7 @@ async function logout() {
     state.plans = [];
     state.observations = [];
     state.machinery = [];
+    state.economy = [];
     state.users = [];
     renderLogin(false);
   } catch (error) {
