@@ -15,6 +15,7 @@ const icons = {
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg>',
   lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3m-4 4v3"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></svg>',
+  tractor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 16h10l2 3h6v-6h-4l-2-4h-5v7"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M10 9h4M7 12V7h5"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
 };
 
@@ -477,6 +478,7 @@ function renderPage() {
   if (state.page === 'plans') target.innerHTML = renderPlans();
   if (state.page === 'growth') target.innerHTML = renderGrowth();
   if (state.page === 'users') target.innerHTML = renderUsers();
+  if (state.page === 'machinery') target.innerHTML = renderMachinery();
   bindPageEvents(target);
 }
 
@@ -606,6 +608,14 @@ function renderUsers() {
       </tr>`).join('')}
     </tbody></table></div></div>
     <div class="card panel users-security"><div class="panel-head"><div><h2 class="panel-title">Sikkerhed</h2><p class="panel-subtitle">Brug personlige logins, og skift adgangskode med jævne mellemrum.</p></div></div><button class="button secondary" data-action="change-password">${icons.lock}<span>Skift min adgangskode</span></button></div>`;
+}
+
+function renderMachinery() {
+  return `${heading('Maskiner og udstyr', 'Maskinpakke', 'Samlet oversigt over gårdens maskiner og udstyr.')}
+    <section class="card panel">
+      <h2 class="panel-title">Kom godt i gang</h2>
+      <p class="panel-subtitle">Maskinpakke-siden er oprettet. Her kan du senere tilføje oplysninger om gårdens maskiner og udstyr.</p>
+    </section>`;
 }
 
 function bindPageEvents(target) {
