@@ -980,7 +980,7 @@ function passwordForm() {
 
 function formInput(name, label, value = '', placeholder = '', opts = {}) {
   const required = opts.required ? '<span class="required">*</span>' : '';
-  return `<div class="form-field ${opts.full ? 'full' : ''}"><label for="f-${name}">${label} ${required}</label><input id="f-${name}" name="${name}" value="${esc(value ?? '')}" placeholder="${esc(placeholder)}" type="${opts.type || 'text'}" ${opts.required ? 'required' : ''} ${opts.min ? `min="${opts.min}"` : ''} ${opts.step ? `step="${opts.step}"` : ''} ${opts.minLength ? `minlength="${opts.minLength}"` : ''} ${opts.type === 'number' ? 'max="1000000"' : ''} ${opts.type === 'password' ? 'autocomplete="new-password"' : ''}></div>`;
+  return `<div class="form-field ${opts.full ? 'full' : ''}"><label for="f-${name}">${label} ${required}</label><input id="f-${name}" name="${name}" value="${esc(value ?? '')}" placeholder="${esc(placeholder)}" type="${opts.type || 'text'}" ${opts.required ? 'required' : ''} ${opts.min ? `min="${opts.min}"` : ''} ${opts.step ? `step="${opts.step}"` : ''} ${opts.minLength ? `minlength="${opts.minLength}"` : ''} ${opts.type === 'number' ? 'max="100000000000000000"' : ''} ${opts.type === 'password' ? 'autocomplete="new-password"' : ''}></div>`;
 }
 
 function formSelect(name, label, options, selected, required = false, rawOptions = null) {
